@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
+import { ref, getDownloadURL, uploadBytesResumable, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePlayer } from '../context/PlayerContext';
@@ -67,48 +67,41 @@ export function HomeView({ title = "Your Groove", onlyUserSongs = false, searchM
     setUploadProgress(0);
 
     try {
-      const storageRef = ref(storage, `songs/${user.uid}/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, file);
+      // Sanitize filename to avoid weird character issues in storage paths
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const storageRef = ref(storage, `songs/${user.uid}/${Date.now()}_${sanitizedName}`);
+      
+      console.log("Starting direct upload (uploadBytes) to:", storageRef.fullPath);
+      const uploadResult = await uploadBytes(storageRef, file);
+      console.log("Upload successful, metadata:", uploadResult.metadata);
+      
+      const url = await getDownloadURL(uploadResult.ref);
+      console.log("URL obtained:", url);
 
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress(Math.round(progress));
-        },
-        (error) => {
-          console.error("Upload failed:", error);
-          setErrorMessage("Failed to upload file to storage. Please check your connection.");
-          setUploading(false);
-          setUploadProgress(null);
-        },
-        async () => {
-          try {
-            const url = await getDownloadURL(uploadTask.snapshot.ref);
-            await addDoc(collection(db, 'songs'), {
-              title: newSong.title || file.name,
-              artist: newSong.artist || 'Unknown Artist',
-              audioUrl: url,
-              uploaderId: user.uid,
-              uploaderEmail: user.email,
-              createdAt: serverTimestamp()
-            });
+      await addDoc(collection(db, 'songs'), {
+        title: newSong.title || file.name,
+        artist: newSong.artist || 'Unknown Artist',
+        audioUrl: url,
+        uploaderId: user.uid,
+        uploaderEmail: user.email || 'unknown',
+        createdAt: serverTimestamp()
+      });
 
-            setShowUpload(false);
-            setFile(null);
-            setNewSong({ title: '', artist: '' });
-          } catch (dbErr: any) {
-            console.error("Database save failed:", dbErr);
-            setErrorMessage(`Failed to save song info: ${dbErr.message || 'Check database permissions'}`);
-          } finally {
-            setUploading(false);
-            setUploadProgress(null);
-          }
-        }
-      );
+      console.log("Firestore document saved.");
+      setShowUpload(false);
+      setFile(null);
+      setNewSong({ title: '', artist: '' });
+      setUploading(false);
+      setUploadProgress(null);
     } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || "An unexpected error occurred during upload.");
+      console.error("Upload process failed:", err);
+      let msg = "Upload failed.";
+      if (err.code === 'storage/unauthorized') {
+        msg = "Upload failed: Permission denied. Storage rules might be missing or incorrect.";
+      } else {
+        msg = `Upload failed: ${err.message || 'Unknown error'}`;
+      }
+      setErrorMessage(msg);
       setUploading(false);
       setUploadProgress(null);
     }

@@ -5,8 +5,25 @@ import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePlayer } from '../context/PlayerContext';
 import { Playlist, Song } from '../types';
-import { Play, Clock, Upload, X, Edit2, Trash2, Camera, Music2, Plus } from 'lucide-react';
+import { Play, Clock, Upload, X, Edit2, Trash2, Camera, Music2, Plus, GripVertical } from 'lucide-react';
 import { cn } from '../lib/utils';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface PlaylistViewProps {
   playlistId: string;
@@ -62,6 +79,35 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
   const [newSong, setNewSong] = useState({ title: '', artist: '' });
   const [file, setFile] = useState<File | null>(null);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setSongs((items: Song[]) => {
+        const oldIndex = items.findIndex((i) => i.id === active.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+
+        const newOrderedSongs = arrayMove(items, oldIndex, newIndex);
+        
+        // Update Firestore
+        if (playlist) {
+          updateDoc(doc(db, 'playlists', playlist.id), {
+            songIds: newOrderedSongs.map((s: Song) => s.id)
+          }).catch(console.error);
+        }
+
+        return newOrderedSongs;
+      });
+    }
+  };
+
   useEffect(() => {
     // Fetch latest 50 songs for recommendations, excluding those already in playlist
     const q = query(collection(db, 'songs'), orderBy('createdAt', 'desc'), limit(50));
@@ -92,51 +138,39 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
     setUploadProgress(0);
 
     try {
-      const storageRef = ref(storage, `songs/${user.uid}/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, file);
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const storageRef = ref(storage, `songs/${user.uid}/${Date.now()}_${sanitizedName}`);
+      
+      console.log("Starting direct upload (uploadBytes) from playlist view to:", storageRef.fullPath);
+      const uploadResult = await uploadBytes(storageRef, file);
+      console.log("Upload successful, getting download URL...");
+      
+      const url = await getDownloadURL(uploadResult.ref);
+      console.log("URL obtained, saving to Firestore...");
+      
+      const songDoc = await addDoc(collection(db, 'songs'), {
+        title: newSong.title || file.name,
+        artist: newSong.artist || 'Unknown Artist',
+        audioUrl: url,
+        uploaderId: user.uid,
+        uploaderEmail: user.email || 'unknown',
+        createdAt: serverTimestamp()
+      });
 
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress(Math.round(progress));
-        },
-        (error) => {
-          console.error("Upload failed:", error);
-          alert("Upload failed. Storage rules may be blocking you or connection lost.");
-          setUploading(false);
-        },
-        async () => {
-          try {
-            const url = await getDownloadURL(uploadTask.snapshot.ref);
-            const songDoc = await addDoc(collection(db, 'songs'), {
-              title: newSong.title || file.name,
-              artist: newSong.artist || 'Unknown Artist',
-              audioUrl: url,
-              uploaderId: user.uid,
-              uploaderEmail: user.email,
-              createdAt: serverTimestamp()
-            });
+      console.log("Song saved to DB. ID:", songDoc.id);
+      // Add to current playlist
+      await updateDoc(doc(db, 'playlists', playlist.id), {
+        songIds: [...playlist.songIds, songDoc.id]
+      });
+      console.log("Added to playlist.");
 
-            // Add to current playlist
-            await updateDoc(doc(db, 'playlists', playlist.id), {
-              songIds: [...playlist.songIds, songDoc.id]
-            });
-
-            setShowUploadModal(false);
-            setFile(null);
-            setNewSong({ title: '', artist: '' });
-          } catch (dbErr: any) {
-            console.error("Database save failed:", dbErr);
-            alert(`Failed to save song info: ${dbErr.message}`);
-          } finally {
-            setUploading(false);
-          }
-        }
-      );
+      setShowUploadModal(false);
+      setFile(null);
+      setNewSong({ title: '', artist: '' });
+      setUploading(false);
     } catch (err: any) {
-      console.error(err);
-      alert(err.message || "An unexpected error occurred.");
+      console.error("Upload failed in playlist view:", err);
+      alert(`Upload failed: ${err.message || 'Unknown error'}`);
       setUploading(false);
     }
   };
@@ -261,7 +295,7 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
         </div>
 
         <div className="flex-1">
-          <div className="grid grid-cols-[16px_1fr_1fr_40px] gap-4 px-4 py-2 text-zinc-400 text-[10px] font-bold border-b border-white/10 uppercase tracking-widest mb-4">
+          <div className="grid grid-cols-[32px_1fr_1fr_40px] gap-4 px-4 py-2 text-zinc-400 text-[10px] font-bold border-b border-white/10 uppercase tracking-widest mb-4">
             <span>#</span>
             <span>Title</span>
             <span>Artist</span>
@@ -269,42 +303,29 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
           </div>
 
           <div className="space-y-1">
-            {songs.map((song, index) => (
-              <div 
-                key={song.id} 
-                onDoubleClick={() => playSong(song, songs)}
-                className="grid grid-cols-[16px_1fr_1fr_40px] gap-4 px-4 py-3 rounded-md hover:bg-white/5 transition-all group items-center cursor-pointer"
+            <DndContext 
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext 
+                items={songs.map(s => s.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <div className="text-sm">
-                  {currentSong?.id === song.id && isPlaying ? (
-                    <div className="w-3 h-3 bg-spotify-green rounded-full animate-pulse" />
-                  ) : (
-                    <span className={cn(
-                      "group-hover:hidden text-zinc-500",
-                      currentSong?.id === song.id && "text-spotify-green"
-                    )}>{index + 1}</span>
-                  )}
-                  <Play size={14} fill="currentColor" className="hidden group-hover:block text-white" onClick={() => playSong(song, songs)} />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className={cn(
-                    "text-sm font-medium truncate",
-                    currentSong?.id === song.id ? "text-spotify-green" : "text-white"
-                  )}>{song.title}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-zinc-400 truncate">{song.artist}</span>
-                  <button 
-                    onClick={(e) => removeFromPlaylist(song.id, e)}
-                    className="hidden group-hover:flex text-zinc-500 hover:text-red-500 transition-colors p-1"
-                    title="Remove from playlist"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <span className="text-sm text-zinc-500 flex justify-center">--:--</span>
-              </div>
-            ))}
+                {songs.map((song, index) => (
+                  <SortableSongRow 
+                    key={song.id}
+                    song={song}
+                    index={index}
+                    songs={songs}
+                    currentSong={currentSong}
+                    isPlaying={isPlaying}
+                    playSong={playSong}
+                    removeFromPlaylist={removeFromPlaylist}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
 
             {songs.length === 0 && (
               <div className="text-center py-20 text-zinc-500">
@@ -370,6 +391,92 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
         file={file}
         setFile={setFile}
       />
+    </div>
+  );
+}
+
+interface SortableSongRowProps {
+  song: Song;
+  index: number;
+  songs: Song[];
+  currentSong: Song | null;
+  isPlaying: boolean;
+  playSong: (song: Song, playlist: Song[]) => void;
+  removeFromPlaylist: (songId: string, e: React.MouseEvent) => void | Promise<void>;
+}
+
+const SortableSongRow: React.FC<SortableSongRowProps> = ({ 
+  song, 
+  index, 
+  songs, 
+  currentSong, 
+  isPlaying, 
+  playSong, 
+  removeFromPlaylist 
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: song.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 'auto',
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div 
+      ref={setNodeRef}
+      style={style}
+      onDoubleClick={() => playSong(song, songs)}
+      className={cn(
+        "grid grid-cols-[32px_1fr_1fr_40px] gap-4 px-4 py-3 rounded-md hover:bg-white/5 transition-all group items-center cursor-pointer relative",
+        isDragging && "bg-white/10 shadow-xl"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <div 
+          {...attributes} 
+          {...listeners}
+          className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-zinc-500"
+        >
+          <GripVertical size={14} />
+        </div>
+        <div className="text-sm w-4">
+          {currentSong?.id === song.id && isPlaying ? (
+            <div className="w-3 h-3 bg-spotify-green rounded-full animate-pulse" />
+          ) : (
+            <span className={cn(
+              "group-hover:hidden text-zinc-500",
+              currentSong?.id === song.id && "text-spotify-green"
+            )}>{index + 1}</span>
+          )}
+          <Play size={14} fill="currentColor" className="hidden group-hover:block text-white" onClick={() => playSong(song, songs)} />
+        </div>
+      </div>
+      <div className="flex flex-col min-w-0">
+        <span className={cn(
+          "text-sm font-medium truncate",
+          currentSong?.id === song.id ? "text-spotify-green" : "text-white"
+        )}>{song.title}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-zinc-400 truncate">{song.artist}</span>
+        <button 
+          onClick={(e) => removeFromPlaylist(song.id, e)}
+          className="hidden group-hover:flex text-zinc-500 hover:text-red-500 transition-colors p-1"
+          title="Remove from playlist"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+      <span className="text-sm text-zinc-500 flex justify-center">--:--</span>
     </div>
   );
 }

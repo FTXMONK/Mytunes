@@ -36,22 +36,19 @@ service cloud.firestore {
     // --- Songs ---
     match /songs/{songId} {
       function isValidSong(data) {
-        return data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
-               data.artist is string && data.artist.size() > 0 && data.artist.size() <= 200 &&
-               data.audioUrl is string && data.audioUrl.size() > 0 &&
-               data.uploaderId == request.auth.uid &&
-               data.uploaderEmail == request.auth.token.email;
+        return (data.get('title', '') is string) &&
+               (data.get('artist', '') is string) &&
+               (data.get('audioUrl', '') is string) &&
+               (data.get('uploaderId', '') == request.auth.uid);
       }
 
       allow read: if isSignedIn();
       
-      allow create: if isSignedIn() && isValidSong(incoming()) && incoming().createdAt == request.time;
+      allow create: if isSignedIn() && isValidSong(incoming());
       
       allow update: if isSignedIn() && 
                       (resource.data.uploaderId == request.auth.uid || isSuperAdmin()) && 
-                      isValidSong(incoming()) &&
-                      incoming().uploaderId == existing().uploaderId &&
-                      incoming().createdAt == existing().createdAt;
+                      isValidSong(incoming());
                       
       allow delete: if isSignedIn() && (resource.data.uploaderId == request.auth.uid || isSuperAdmin());
     }
