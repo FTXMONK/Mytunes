@@ -1,0 +1,130 @@
+import React, { useState, useEffect } from 'react';
+import { Home, Search, Library, Plus, Music2, Heart, Users } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
+import { Playlist } from '../types';
+
+interface SidebarProps {
+  className?: string;
+  id?: string;
+  activeView: 'home' | 'users' | 'playlist';
+  selectedPlaylistId?: string | null;
+  setActiveView: (view: 'home' | 'users' | 'playlist') => void;
+  onSelectPlaylist: (id: string) => void;
+}
+
+export function Sidebar({ className, id, activeView, selectedPlaylistId, setActiveView, onSelectPlaylist }: SidebarProps) {
+  const { user, isAdmin } = useAuth();
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'playlists'), where('ownerId', '==', user.uid));
+    return onSnapshot(q, (snapshot) => {
+      setPlaylists(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Playlist)));
+    });
+  }, [user]);
+
+  return (
+    <div id={id} className={cn("flex flex-col bg-black border-r border-white/5 h-full", className)}>
+      <div className="p-6 flex flex-col gap-8">
+        <div className="flex items-center gap-3">
+          <img src="https://i.postimg.cc/sX9SSZMf/IMG-2302.png" alt="Mytunes Logo" className="w-10 h-10 object-contain" />
+          <span className="font-bold text-xl tracking-tight">Mytunes</span>
+        </div>
+        
+        <nav className="flex flex-col gap-5">
+          <NavItem 
+            icon={<Home size={24} />} 
+            label="Home" 
+            active={activeView === 'home'} 
+            onClick={() => setActiveView('home')}
+          />
+          <NavItem icon={<Search size={24} />} label="Search" />
+          <NavItem icon={<Library size={24} />} label="Your Library" />
+          {isAdmin && (
+            <NavItem 
+              icon={<Users size={24} />} 
+              label="Admin Panel" 
+              active={activeView === 'users'} 
+              onClick={() => setActiveView('users')}
+            />
+          )}
+        </nav>
+      </div>
+
+      <div className="flex-1 p-6 overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between mb-4 text-zinc-500 hover:text-white transition cursor-pointer group">
+          <p className="text-xs font-bold uppercase tracking-widest">Playlists</p>
+          <Plus 
+            size={18} 
+            className="hover:bg-zinc-800 rounded-full p-0.5 transition-transform active:scale-90" 
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (!user) return;
+              const name = prompt('Enter playlist name:');
+              if (name) {
+                await addDoc(collection(db, 'playlists'), {
+                  name,
+                  ownerId: user.uid,
+                  songIds: [],
+                  createdAt: serverTimestamp()
+                });
+              }
+            }}
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3 scrollbar-hide">
+          {playlists.map(playlist => (
+            <div 
+              key={playlist.id} 
+              onClick={() => onSelectPlaylist(playlist.id)}
+              className="text-sm text-zinc-400 hover:text-white transition cursor-pointer flex items-center gap-2 group"
+            >
+              <span className={cn(
+                "w-1 h-1 rounded-full bg-spotify-green transition-all",
+                activeView === 'playlist' && playlist.id === selectedPlaylistId ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )} />
+              <span className="truncate">{playlist.name}</span>
+            </div>
+          ))}
+          {playlists.length === 0 && (
+            <p className="text-[10px] text-zinc-600 uppercase tracking-widest text-center mt-4">No content</p>
+          )}
+        </div>
+      </div>
+      
+      {user && (
+        <div className="p-6 mt-auto">
+          <div className="flex items-center gap-3 p-2 rounded-lg bg-zinc-900/50 border border-white/5">
+            <div className="w-8 h-8 rounded bg-gradient-to-br from-spotify-green to-emerald-900 flex items-center justify-center text-xs font-bold">
+              {user.email?.[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate">{user.email}</p>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-tighter">Premium Member</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
+  return (
+    <div 
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-4 cursor-pointer transition-all duration-200",
+        active ? "text-spotify-green font-semibold" : "text-zinc-400 hover:text-white"
+      )}
+    >
+      {icon}
+      <span className="text-sm font-medium">{label}</span>
+    </div>
+  );
+}

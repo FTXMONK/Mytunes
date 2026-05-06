@@ -1,0 +1,85 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email == 'mayankand1234@gmail.com';
+    }
+
+    // --- Songs ---
+    match /songs/{songId} {
+      function isValidSong(data) {
+        return data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+               data.artist is string && data.artist.size() > 0 && data.artist.size() <= 200 &&
+               data.audioUrl is string && data.audioUrl.size() > 0 &&
+               data.uploaderId == request.auth.uid &&
+               data.uploaderEmail == request.auth.token.email;
+      }
+
+      allow get: if isSignedIn() && (resource.data.uploaderId == request.auth.uid || isSuperAdmin());
+      allow list: if isSignedIn() && (resource.data.uploaderId == request.auth.uid || isSuperAdmin());
+      
+      allow create: if isSignedIn() && isEmailVerified() && isValidSong(incoming()) && incoming().createdAt == request.time;
+      
+      allow update: if isSignedIn() && isEmailVerified() && 
+                      resource.data.uploaderId == request.auth.uid && 
+                      isValidSong(incoming()) &&
+                      incoming().uploaderId == existing().uploaderId &&
+                      incoming().createdAt == existing().createdAt;
+                      
+      allow delete: if isSignedIn() && resource.data.uploaderId == request.auth.uid;
+    }
+
+    // --- Playlists ---
+    match /playlists/{playlistId} {
+      function isValidPlaylist(data) {
+        return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+               data.ownerId == request.auth.uid &&
+               data.songIds is list && data.songIds.size() <= 1000;
+      }
+
+      allow read: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
+      allow create: if isSignedIn() && isEmailVerified() && isValidPlaylist(incoming()) && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && isEmailVerified() && 
+                      resource.data.ownerId == request.auth.uid && 
+                      isValidPlaylist(incoming()) &&
+                      incoming().ownerId == existing().ownerId &&
+                      incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // --- Users ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow list: if isSignedIn() && isSuperAdmin();
+      allow write: if isSignedIn() && userId == request.auth.uid;
+    }
+  }
+}

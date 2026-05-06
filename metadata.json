@@ -1,0 +1,6 @@
+{
+  "name": "Mytunes",
+  "description": "A premium music streaming service with Firebase integration, advanced playback controls, and playlist management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
