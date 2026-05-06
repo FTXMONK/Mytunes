@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Song } from '../types';
 import { usePlayer } from '../context/PlayerContext';
-import { Music, Play, Trash2, Mail, Clock, User } from 'lucide-react';
+import { Music, Play, Trash2, Mail, Clock, User, Edit2, Check, X } from 'lucide-react';
 import { formatTime, cn } from '../lib/utils';
 
 export function AdminSongsView() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingSongId, setEditingSongId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ title: '', artist: '' });
   const { playSong, currentSong, isPlaying } = usePlayer();
 
   useEffect(() => {
@@ -22,6 +24,23 @@ export function AdminSongsView() {
     });
     return unsubscribe;
   }, []);
+
+  const handleEdit = (song: Song) => {
+    setEditingSongId(song.id);
+    setEditForm({ title: song.title, artist: song.artist });
+  };
+
+  const handleSave = async (song: Song) => {
+    try {
+      await updateDoc(doc(db, 'songs', song.id), {
+        title: editForm.title,
+        artist: editForm.artist
+      });
+      setEditingSongId(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this song? This cannot be undone.')) {
@@ -68,12 +87,30 @@ export function AdminSongsView() {
                       <div className="w-10 h-10 bg-zinc-800 rounded flex items-center justify-center text-zinc-600 group-hover:text-spotify-green transition-colors">
                         <Music size={20} />
                       </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className={cn(
-                          "text-sm font-semibold truncate",
-                          currentSong?.id === song.id ? "text-spotify-green" : "text-white"
-                        )}>{song.title}</span>
-                        <span className="text-xs text-zinc-500">{song.artist}</span>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        {editingSongId === song.id ? (
+                          <div className="flex flex-col gap-2">
+                            <input 
+                              autoFocus
+                              className="bg-zinc-800 text-sm font-semibold p-1 rounded outline-none border border-spotify-green/50"
+                              value={editForm.title}
+                              onChange={e => setEditForm({...editForm, title: e.target.value})}
+                            />
+                            <input 
+                              className="bg-zinc-800 text-xs text-zinc-500 p-1 rounded outline-none border border-white/10"
+                              value={editForm.artist}
+                              onChange={e => setEditForm({...editForm, artist: e.target.value})}
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <span className={cn(
+                              "text-sm font-semibold truncate",
+                              currentSong?.id === song.id ? "text-spotify-green" : "text-white"
+                            )}>{song.title}</span>
+                            <span className="text-xs text-zinc-500">{song.artist}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -91,6 +128,29 @@ export function AdminSongsView() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-3">
+                      {editingSongId === song.id ? (
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => handleSave(song)}
+                            className="p-2 text-spotify-green hover:bg-spotify-green/10 rounded-lg transition-all"
+                          >
+                            <Check size={16} />
+                          </button>
+                          <button 
+                            onClick={() => setEditingSongId(null)}
+                            className="p-2 text-zinc-500 hover:bg-white/10 rounded-lg transition-all"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => handleEdit(song)}
+                          className="p-2 text-zinc-500 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                      )}
                       <button 
                         onClick={() => playSong(song, songs)}
                         className="p-2 bg-white text-black rounded-full hover:scale-110 active:scale-95 transition-all shadow-lg"

@@ -49,7 +49,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidSong(incoming()) && incoming().createdAt == request.time;
       
       allow update: if isSignedIn() && 
-                      resource.data.uploaderId == request.auth.uid && 
+                      (resource.data.uploaderId == request.auth.uid || isSuperAdmin()) && 
                       isValidSong(incoming()) &&
                       incoming().uploaderId == existing().uploaderId &&
                       incoming().createdAt == existing().createdAt;

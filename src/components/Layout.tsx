@@ -39,6 +39,22 @@ export function Layout({
     }
   };
 
+  const handleGoogleAuth = async () => {
+    setError('');
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      console.error('Google Auth Error:', err);
+      if (err.code === 'auth/unauthorized-domain') {
+        setError('Domain not authorized. Please add this URL to your Firebase Console > Auth > Settings > Authorized Domains.');
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('Popup blocked by browser. Please allow popups for this site.');
+      } else {
+        setError(err.message || 'Google Login failed');
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-[#090909] text-white">
@@ -59,7 +75,7 @@ export function Layout({
           <p className="mb-8 text-zinc-400 text-sm">Experience your music like never before.</p>
           
           <button
-            onClick={signInWithGoogle}
+            onClick={handleGoogleAuth}
             className="w-full flex items-center justify-center gap-3 rounded-full bg-black border border-white/20 text-white px-8 py-3 font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] shadow-2xl mb-6"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -125,7 +141,18 @@ export function Layout({
                 onChange={e => setPassword(e.target.value)}
               />
             </div>
-            {error && <p className="text-red-500 text-xs text-center">{error}</p>}
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-4">
+                <p className="text-red-500 text-[11px] leading-relaxed text-center font-medium">
+                  {error}
+                </p>
+                {error.includes('auth/unauthorized-domain') && (
+                  <p className="text-zinc-500 text-[10px] mt-2 text-center">
+                    Project ID: gen-lang-client-0178848928
+                  </p>
+                )}
+              </div>
+            )}
             <button
               type="submit"
               className="w-full bg-spotify-green text-black font-bold py-3 rounded-full hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl"
