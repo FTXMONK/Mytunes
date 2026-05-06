@@ -126,10 +126,10 @@ export function HomeView() {
       <header className="h-16 flex items-center justify-between px-8 z-10 sticky top-0 transition-all">
         <div className="flex gap-4">
           <button className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center text-zinc-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>
           </button>
           <button className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center text-zinc-400 opacity-50">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"/></svg>
           </button>
         </div>
         <button 

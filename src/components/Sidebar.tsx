@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Search, Library, Plus, Music2, Heart, Users } from 'lucide-react';
+import { Home, Search, Library, Plus, Music2, Heart, Users, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, logout } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Playlist } from '../types';
 
@@ -130,7 +130,7 @@ export function Sidebar({ className, id, activeView, selectedPlaylistId, setActi
       </div>
       
       {user && (
-        <div className="p-6 mt-auto">
+        <div className="p-4 mt-auto flex flex-col gap-2">
           <div className="flex items-center gap-3 p-2 rounded-lg bg-zinc-900/50 border border-white/5">
             <div className="w-8 h-8 rounded bg-gradient-to-br from-spotify-green to-emerald-900 flex items-center justify-center text-xs font-bold">
               {user.email?.[0].toUpperCase()}
@@ -140,6 +140,13 @@ export function Sidebar({ className, id, activeView, selectedPlaylistId, setActi
               <p className="text-[10px] text-zinc-500 uppercase tracking-tighter">Premium Member</p>
             </div>
           </div>
+          <button 
+            onClick={() => logout()}
+            className="flex items-center gap-3 p-2 text-zinc-500 hover:text-white transition group w-full rounded-lg hover:bg-white/5"
+          >
+            <LogOut size={18} className="group-hover:text-red-500 transition-colors" />
+            <span className="text-xs font-bold uppercase tracking-widest">Log Out</span>
+          </button>
         </div>
       )}
     </div>
