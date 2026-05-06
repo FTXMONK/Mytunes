@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePlayer } from '../context/PlayerContext';
-import { Song } from '../types';
-import { Play, Plus, Clock, Upload, X, Music2 } from 'lucide-react';
+import { Song, Playlist } from '../types';
+import { Play, Plus, Clock, Upload, X, Music2, Edit2, Check, Trash2 } from 'lucide-react';
 import { formatTime, cn } from '../lib/utils';
+import { updateDoc, doc, deleteDoc } from 'firebase/firestore';
 
 export function HomeView() {
   const { user, isAdmin } = useAuth();
@@ -16,6 +17,19 @@ export function HomeView() {
   const [uploading, setUploading] = useState(false);
   const [newSong, setNewSong] = useState({ title: '', artist: '' });
   const [file, setFile] = useState<File | null>(null);
+  const [editingSongId, setEditingSongId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ title: '', artist: '' });
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [showPlaylistMenu, setShowPlaylistMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'playlists'), where('ownerId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setPlaylists(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Playlist)));
+    });
+    return unsubscribe;
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -53,6 +67,53 @@ export function HomeView() {
       console.error(err);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const startEditing = (song: Song) => {
+    setEditingSongId(song.id);
+    setEditForm({ title: song.title, artist: song.artist });
+  };
+
+  const saveEdit = async (songId: string) => {
+    try {
+      await updateDoc(doc(db, 'songs', songId), {
+        title: editForm.title,
+        artist: editForm.artist
+      });
+      setEditingSongId(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const deleteSong = async (id: string) => {
+    if (confirm('Are you sure you want to delete this song?')) {
+      try {
+        await deleteDoc(doc(db, 'songs', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const addToPlaylist = async (playlistId: string, songId: string) => {
+    const playlist = playlists.find(p => p.id === playlistId);
+    if (!playlist) return;
+    
+    if (playlist.songIds.includes(songId)) {
+      alert('Song already in playlist');
+      setShowPlaylistMenu(null);
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'playlists', playlistId), {
+        songIds: [...playlist.songIds, songId]
+      });
+      setShowPlaylistMenu(null);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -128,14 +189,87 @@ export function HomeView() {
                   />
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <span className={cn(
-                    "text-sm font-medium truncate",
-                    currentSong?.id === song.id ? "text-spotify-green" : "text-white"
-                  )}>{song.title}</span>
+                  {editingSongId === song.id ? (
+                    <input 
+                      autoFocus
+                      className="bg-zinc-800 text-sm font-medium py-0.5 px-2 rounded outline-none border border-spotify-green/50"
+                      value={editForm.title}
+                      onChange={e => setEditForm({...editForm, title: e.target.value})}
+                    />
+                  ) : (
+                    <span className={cn(
+                      "text-sm font-medium truncate",
+                      currentSong?.id === song.id ? "text-spotify-green" : "text-white"
+                    )}>{song.title}</span>
+                  )}
                   {isAdmin && <span className="text-[9px] text-[#b3b3b3]/40 truncate">{song.uploaderEmail}</span>}
                 </div>
-                <span className="text-sm text-zinc-400 group-hover:text-zinc-200 truncate">{song.artist}</span>
-                <span className="text-sm text-zinc-500 flex justify-center group-hover:text-white">--:--</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  {editingSongId === song.id ? (
+                    <input 
+                      className="bg-zinc-800 text-sm text-zinc-300 py-0.5 px-2 rounded outline-none border border-white/10 w-full"
+                      value={editForm.artist}
+                      onChange={e => setEditForm({...editForm, artist: e.target.value})}
+                    />
+                  ) : (
+                    <span className="text-sm text-zinc-400 group-hover:text-zinc-200 truncate">{song.artist}</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  {(song.uploaderId === user?.uid || isAdmin) && (
+                    <div className="hidden group-hover:flex items-center gap-2 mr-2">
+                      {editingSongId === song.id ? (
+                        <button onClick={() => saveEdit(song.id)} className="text-spotify-green p-1 hover:bg-white/10 rounded">
+                          <Check size={14} />
+                        </button>
+                      ) : (
+                        <button onClick={() => startEditing(song)} className="text-zinc-500 hover:text-white p-1 hover:bg-white/10 rounded">
+                          <Edit2 size={14} />
+                        </button>
+                      )}
+                      {(song.uploaderId === user?.uid || isAdmin) && (
+                        <button onClick={() => deleteSong(song.id)} className="text-zinc-500 hover:text-red-500 p-1 hover:bg-white/10 rounded">
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  
+                  <div className="relative group/menu">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowPlaylistMenu(showPlaylistMenu === song.id ? null : song.id);
+                      }}
+                      className="text-zinc-500 hover:text-white p-1 hover:bg-white/10 rounded"
+                    >
+                      <Plus size={16} />
+                    </button>
+                    {showPlaylistMenu === song.id && (
+                      <div className="absolute right-0 bottom-full mb-2 w-48 bg-[#282828] border border-white/10 rounded-md shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                        <div className="p-2 border-b border-white/5 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                          Add to playlist
+                        </div>
+                        <div className="max-h-40 overflow-y-auto pt-1">
+                          {playlists.map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => addToPlaylist(p.id, song.id)}
+                              className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/10 hover:text-white truncate"
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                          {playlists.length === 0 && (
+                            <div className="px-3 py-2 text-[10px] text-zinc-600 italic">No playlists</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <span className="text-sm text-zinc-500 group-hover:text-white">--:--</span>
+                </div>
               </div>
             ))}
 

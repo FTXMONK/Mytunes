@@ -9,15 +9,17 @@ import { Playlist } from '../types';
 interface SidebarProps {
   className?: string;
   id?: string;
-  activeView: 'home' | 'users' | 'playlist';
+  activeView: 'home' | 'users' | 'playlist' | 'admin-songs';
   selectedPlaylistId?: string | null;
-  setActiveView: (view: 'home' | 'users' | 'playlist') => void;
+  setActiveView: (view: 'home' | 'users' | 'playlist' | 'admin-songs') => void;
   onSelectPlaylist: (id: string) => void;
 }
 
 export function Sidebar({ className, id, activeView, selectedPlaylistId, setActiveView, onSelectPlaylist }: SidebarProps) {
   const { user, isAdmin } = useAuth();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -27,12 +29,31 @@ export function Sidebar({ className, id, activeView, selectedPlaylistId, setActi
     });
   }, [user]);
 
+  const handleCreatePlaylist = async () => {
+    if (!newPlaylistName.trim() || !user) {
+      setIsCreating(false);
+      return;
+    }
+    try {
+      await addDoc(collection(db, 'playlists'), {
+        name: newPlaylistName,
+        ownerId: user.uid,
+        songIds: [],
+        createdAt: serverTimestamp()
+      });
+      setNewPlaylistName('');
+      setIsCreating(false);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div id={id} className={cn("flex flex-col bg-black border-r border-white/5 h-full", className)}>
       <div className="p-6 flex flex-col gap-8">
         <div className="flex items-center gap-3">
-          <img src="https://i.postimg.cc/sX9SSZMf/IMG-2302.png" alt="Mytunes Logo" className="w-10 h-10 object-contain" />
-          <span className="font-bold text-xl tracking-tight">Mytunes</span>
+          <img src="https://i.postimg.cc/sX9SSZMf/IMG-2302.png" alt="TunesByMe Logo" className="w-10 h-10 object-contain" />
+          <span className="font-bold text-xl tracking-tight">TunesByMe</span>
         </div>
         
         <nav className="flex flex-col gap-5">
@@ -44,13 +65,23 @@ export function Sidebar({ className, id, activeView, selectedPlaylistId, setActi
           />
           <NavItem icon={<Search size={24} />} label="Search" />
           <NavItem icon={<Library size={24} />} label="Your Library" />
+          
           {isAdmin && (
-            <NavItem 
-              icon={<Users size={24} />} 
-              label="Admin Panel" 
-              active={activeView === 'users'} 
-              onClick={() => setActiveView('users')}
-            />
+            <div className="pt-4 mt-4 border-t border-white/5 flex flex-col gap-5">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-1">Admin Panel</span>
+              <NavItem 
+                icon={<Users size={24} />} 
+                label="Manage Users" 
+                active={activeView === 'users'} 
+                onClick={() => setActiveView('users')}
+              />
+              <NavItem 
+                icon={<Music2 size={24} />} 
+                label="All Songs" 
+                active={activeView === 'admin-songs'} 
+                onClick={() => setActiveView('admin-songs')}
+              />
+            </div>
           )}
         </nav>
       </div>
@@ -61,23 +92,24 @@ export function Sidebar({ className, id, activeView, selectedPlaylistId, setActi
           <Plus 
             size={18} 
             className="hover:bg-zinc-800 rounded-full p-0.5 transition-transform active:scale-90" 
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (!user) return;
-              const name = prompt('Enter playlist name:');
-              if (name) {
-                await addDoc(collection(db, 'playlists'), {
-                  name,
-                  ownerId: user.uid,
-                  songIds: [],
-                  createdAt: serverTimestamp()
-                });
-              }
-            }}
+            onClick={() => setIsCreating(true)}
           />
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3 scrollbar-hide">
+          {isCreating && (
+            <div className="flex flex-col gap-2 mb-4 animate-in slide-in-from-top-2 duration-200">
+              <input 
+                autoFocus
+                className="bg-zinc-800 text-sm px-3 py-1.5 rounded outline-none border border-spotify-green/50 placeholder:text-zinc-600"
+                placeholder="Playlist name..."
+                value={newPlaylistName}
+                onChange={e => setNewPlaylistName(e.target.value)}
+                onBlur={handleCreatePlaylist}
+                onKeyDown={e => e.key === 'Enter' && handleCreatePlaylist()}
+              />
+            </div>
+          )}
           {playlists.map(playlist => (
             <div 
               key={playlist.id} 

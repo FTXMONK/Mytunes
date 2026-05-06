@@ -64,6 +64,29 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
     }
   };
 
+  const handleDeletePlaylist = async () => {
+    if (!playlist) return;
+    if (confirm(`Are you sure you want to delete "${playlist.name}"?`)) {
+      try {
+        await deleteDoc(doc(db, 'playlists', playlist.id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const removeFromPlaylist = async (songId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!playlist) return;
+    try {
+      await updateDoc(doc(db, 'playlists', playlist.id), {
+        songIds: playlist.songIds.filter(id => id !== songId)
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !playlist || !user) return;
@@ -132,6 +155,13 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
             )}
             <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
               <span className="text-white">{user?.displayName}</span> • {songs.length} songs
+              <button 
+                onClick={handleDeletePlaylist}
+                className="ml-4 text-zinc-500 hover:text-red-500 transition-colors p-2 hover:bg-white/5 rounded-full"
+                title="Delete Playlist"
+              >
+                <Trash2 size={20} />
+              </button>
             </div>
           </div>
         </div>
@@ -168,7 +198,16 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
                     currentSong?.id === song.id ? "text-spotify-green" : "text-white"
                   )}>{song.title}</span>
                 </div>
-                <span className="text-sm text-zinc-400 truncate">{song.artist}</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-zinc-400 truncate">{song.artist}</span>
+                  <button 
+                    onClick={(e) => removeFromPlaylist(song.id, e)}
+                    className="hidden group-hover:flex text-zinc-500 hover:text-red-500 transition-colors p-1"
+                    title="Remove from playlist"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
                 <span className="text-sm text-zinc-500 flex justify-center">--:--</span>
               </div>
             ))}
