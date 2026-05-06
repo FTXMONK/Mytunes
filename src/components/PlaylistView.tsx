@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, updateDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { doc, onSnapshot, updateDoc, collection, query, where, getDocs, deleteDoc, orderBy, limit, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePlayer } from '../context/PlayerContext';
 import { Playlist, Song } from '../types';
-import { Play, Clock, Upload, X, Edit2, Trash2, Camera, Music2 } from 'lucide-react';
+import { Play, Clock, Upload, X, Edit2, Trash2, Camera, Music2, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface PlaylistViewProps {
@@ -53,6 +53,93 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
     };
     fetchSongs();
   }, [playlist?.songIds]);
+
+  const [allSongs, setAllSongs] = useState<Song[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [newSong, setNewSong] = useState({ title: '', artist: '' });
+  const [file, setFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    // Fetch latest 50 songs for recommendations, excluding those already in playlist
+    const q = query(collection(db, 'songs'), orderBy('createdAt', 'desc'), limit(50));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAllSongs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Song)));
+    });
+    return unsubscribe;
+  }, []);
+
+  const addToPlaylist = async (songId: string) => {
+    if (!playlist) return;
+    if (playlist.songIds.includes(songId)) return;
+    try {
+      await updateDoc(doc(db, 'playlists', playlist.id), {
+        songIds: [...playlist.songIds, songId]
+      });
+    } catch (err) {
+      console.error('Failed to add song to playlist:', err);
+      alert('Failed to add song. Check console for details.');
+    }
+  };
+
+  const handleUploadToPlaylist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file || !user || !playlist) return;
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const storageRef = ref(storage, `songs/${user.uid}/${Date.now()}_${file.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, file);
+
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setUploadProgress(Math.round(progress));
+        },
+        (error) => {
+          console.error("Upload failed:", error);
+          alert("Upload failed. Storage rules may be blocking you or connection lost.");
+          setUploading(false);
+        },
+        async () => {
+          try {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            const songDoc = await addDoc(collection(db, 'songs'), {
+              title: newSong.title || file.name,
+              artist: newSong.artist || 'Unknown Artist',
+              audioUrl: url,
+              uploaderId: user.uid,
+              uploaderEmail: user.email,
+              createdAt: serverTimestamp()
+            });
+
+            // Add to current playlist
+            await updateDoc(doc(db, 'playlists', playlist.id), {
+              songIds: [...playlist.songIds, songDoc.id]
+            });
+
+            setShowUploadModal(false);
+            setFile(null);
+            setNewSong({ title: '', artist: '' });
+          } catch (dbErr: any) {
+            console.error("Database save failed:", dbErr);
+            alert(`Failed to save song info: ${dbErr.message}`);
+          } finally {
+            setUploading(false);
+          }
+        }
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "An unexpected error occurred.");
+      setUploading(false);
+    }
+  };
 
   const handleRename = async () => {
     if (!playlist || !newName.trim()) return;
@@ -156,8 +243,15 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
             <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
               <span className="text-white">{user?.displayName}</span> • {songs.length} songs
               <button 
+                onClick={() => setShowUploadModal(true)}
+                className="ml-4 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-1.5 rounded-full text-xs font-bold transition-all"
+              >
+                <Plus size={14} />
+                Upload Song
+              </button>
+              <button 
                 onClick={handleDeletePlaylist}
-                className="ml-4 text-zinc-500 hover:text-red-500 transition-colors p-2 hover:bg-white/5 rounded-full"
+                className="ml-2 text-zinc-500 hover:text-red-500 transition-colors p-2 hover:bg-white/5 rounded-full"
                 title="Delete Playlist"
               >
                 <Trash2 size={20} />
@@ -219,7 +313,153 @@ export function PlaylistView({ playlistId }: PlaylistViewProps) {
               </div>
             )}
           </div>
+
+          {/* Add Songs Section */}
+          <div className="mt-16 pt-8 border-t border-white/10">
+            <h2 className="text-2xl font-bold mb-4">Let's find something for your playlist</h2>
+            <div className="relative mb-8">
+              <input 
+                type="text" 
+                placeholder="Search for songs"
+                className="w-full max-w-md bg-white/10 rounded-full px-6 py-3 text-sm outline-none focus:bg-white/20 transition-all"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              {allSongs
+                .filter(s => !playlist.songIds.includes(s.id))
+                .filter(s => 
+                  s.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                  s.artist.toLowerCase().includes(searchQuery.toLowerCase())
+                )
+                .slice(0, 10)
+                .map(song => (
+                  <div key={song.id} className="grid grid-cols-[1fr_40px] gap-4 px-4 py-3 rounded-md hover:bg-white/5 transition-all group items-center">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-zinc-800 rounded flex items-center justify-center text-zinc-600">
+                        <Music2 size={20} />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-white">{song.title}</span>
+                        <span className="text-xs text-zinc-400">{song.artist}</span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => addToPlaylist(song.id)}
+                      className="px-4 py-1 border border-zinc-500 rounded-full text-xs font-bold hover:border-white transition-all whitespace-nowrap"
+                    >
+                      Add
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
         </div>
+      </div>
+
+      <UploadModal 
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onSubmit={handleUploadToPlaylist}
+        uploading={uploading}
+        progress={uploadProgress}
+        newSong={newSong}
+        setNewSong={setNewSong}
+        file={file}
+        setFile={setFile}
+      />
+    </div>
+  );
+}
+
+function UploadModal({ 
+  isOpen, 
+  onClose, 
+  onSubmit, 
+  uploading, 
+  progress, 
+  newSong, 
+  setNewSong, 
+  file, 
+  setFile 
+}: any) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[#181818] w-full max-w-md rounded-2xl p-8 border border-white/5 shadow-2xl relative animate-in fade-in zoom-in duration-200">
+        <button 
+          onClick={onClose}
+          className="absolute top-6 right-6 text-zinc-400 hover:text-white transition-colors"
+        >
+          <X size={24} />
+        </button>
+        <h2 className="text-2xl font-bold mb-8">Upload to Playlist</h2>
+        
+        <form onSubmit={onSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Song Title</label>
+            <input 
+              type="text"
+              required
+              placeholder="Song title"
+              className="w-full bg-[#2a2a2a] border-none rounded-lg p-4 text-sm focus:ring-1 focus:ring-spotify-green outline-none transition-all"
+              value={newSong.title}
+              onChange={e => setNewSong({...newSong, title: e.target.value})}
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Artist</label>
+            <input 
+              type="text"
+              required
+              placeholder="Artist name"
+              className="w-full bg-[#2a2a2a] border-none rounded-lg p-4 text-sm focus:ring-1 focus:ring-spotify-green outline-none transition-all"
+              value={newSong.artist}
+              onChange={e => setNewSong({...newSong, artist: e.target.value})}
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Audio File</label>
+            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-white/5 border-dashed rounded-xl cursor-pointer bg-[#2a2a2a]/30 hover:bg-[#2a2a2a] hover:border-spotify-green/50 transition-all group">
+              <div className="flex flex-col items-center justify-center p-4">
+                <Upload size={24} className="mb-2 text-zinc-400 group-hover:text-spotify-green" />
+                <p className="text-xs text-center text-zinc-400">
+                  {file ? <span className="text-white font-medium">{file.name}</span> : "Select .mp3 file"}
+                </p>
+              </div>
+              <input 
+                type="file" 
+                className="hidden" 
+                accept="audio/*" 
+                onChange={e => setFile(e.target.files?.[0] || null)}
+                disabled={uploading}
+              />
+            </label>
+          </div>
+
+          {uploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] font-bold text-zinc-500">
+                <span>Uploading...</span>
+                <span>{progress}%</span>
+              </div>
+              <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                <div className="h-full bg-spotify-green transition-all" style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+          )}
+
+          <button 
+            type="submit"
+            disabled={uploading || !file}
+            className="w-full bg-spotify-green text-black font-bold py-3 rounded-full hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {uploading ? "Uploading..." : "Add to Playlist"}
+          </button>
+        </form>
       </div>
     </div>
   );

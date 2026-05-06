@@ -9,9 +9,9 @@ import { Playlist } from '../types';
 interface SidebarProps {
   className?: string;
   id?: string;
-  activeView: 'home' | 'users' | 'playlist' | 'admin-songs';
+  activeView: 'home' | 'users' | 'playlist' | 'admin-songs' | 'library' | 'search';
   selectedPlaylistId?: string | null;
-  setActiveView: (view: 'home' | 'users' | 'playlist' | 'admin-songs') => void;
+  setActiveView: (view: 'home' | 'users' | 'playlist' | 'admin-songs' | 'library' | 'search') => void;
   onSelectPlaylist: (id: string) => void;
 }
 
@@ -63,8 +63,18 @@ export function Sidebar({ className, id, activeView, selectedPlaylistId, setActi
             active={activeView === 'home'} 
             onClick={() => setActiveView('home')}
           />
-          <NavItem icon={<Search size={24} />} label="Search" />
-          <NavItem icon={<Library size={24} />} label="Your Library" />
+          <NavItem 
+            icon={<Search size={24} />} 
+            label="Search" 
+            active={activeView === 'search'}
+            onClick={() => setActiveView('search')}
+          />
+          <NavItem 
+            icon={<Library size={24} />} 
+            label="Your Library" 
+            active={activeView === 'library'} 
+            onClick={() => setActiveView('library')}
+          />
           
           {isAdmin && (
             <div className="pt-4 mt-4 border-t border-white/5 flex flex-col gap-5">

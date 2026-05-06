@@ -43,8 +43,7 @@ service cloud.firestore {
                data.uploaderEmail == request.auth.token.email;
       }
 
-      allow get: if isSignedIn() && (resource.data.uploaderId == request.auth.uid || isSuperAdmin());
-      allow list: if isSignedIn() && (resource.data.uploaderId == request.auth.uid || isSuperAdmin());
+      allow read: if isSignedIn();
       
       allow create: if isSignedIn() && isValidSong(incoming()) && incoming().createdAt == request.time;
       
@@ -60,18 +59,23 @@ service cloud.firestore {
     // --- Playlists ---
     match /playlists/{playlistId} {
       function isValidPlaylist(data) {
-        return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-               data.ownerId == request.auth.uid &&
-               data.songIds is list && data.songIds.size() <= 1000;
+        return (data.get('name', '') is string) &&
+               (data.get('ownerId', '') == request.auth.uid) &&
+               (data.get('songIds', []) is list);
+      }
+
+      function isValidPlaylistUpdate() {
+        let data = incoming();
+        let existing = existing();
+        return (isSignedIn() && (existing.ownerId == request.auth.uid || isSuperAdmin())) &&
+               (!data.keys().hasAny(['ownerId', 'createdAt'])) && // Prevent changing immutable fields
+               (data.get('name', existing.name) is string) &&
+               (data.get('songIds', existing.songIds) is list);
       }
 
       allow read: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
       allow create: if isSignedIn() && isValidPlaylist(incoming()) && incoming().createdAt == request.time;
-      allow update: if isSignedIn() && 
-                      (resource.data.ownerId == request.auth.uid || isSuperAdmin()) && 
-                      isValidPlaylist(incoming()) &&
-                      incoming().ownerId == existing().ownerId &&
-                      incoming().createdAt == existing().createdAt;
+      allow update: if isValidPlaylistUpdate();
       allow delete: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
     }
 

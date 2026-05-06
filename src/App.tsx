@@ -13,7 +13,7 @@ import { AdminSongsView } from './components/AdminSongsView';
 import { PlaylistView } from './components/PlaylistView';
 
 export default function App() {
-  const [activeView, setActiveView] = useState<'home' | 'users' | 'admin-songs' | 'playlist'>('home');
+  const [activeView, setActiveView] = useState<'home' | 'users' | 'admin-songs' | 'playlist' | 'library' | 'search'>('home');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
 
   const onSelectPlaylist = (id: string) => {
@@ -25,12 +25,14 @@ export default function App() {
     <AuthProvider>
       <PlayerProvider>
         <Layout 
-          activeView={activeView === 'playlist' ? 'home' : (activeView === 'admin-songs' ? 'users' : activeView)} 
+          activeView={activeView} 
           setActiveView={setActiveView}
           onSelectPlaylist={onSelectPlaylist}
           selectedPlaylistId={selectedPlaylistId}
         >
           {activeView === 'home' && <HomeView />}
+          {activeView === 'library' && <HomeView title="Your Library" onlyUserSongs />}
+          {activeView === 'search' && <HomeView title="Search" searchMode />}
           {activeView === 'users' && <AdminUsersView />}
           {activeView === 'admin-songs' && <AdminSongsView />}
           {activeView === 'playlist' && selectedPlaylistId && (

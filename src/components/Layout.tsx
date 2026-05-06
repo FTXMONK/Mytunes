@@ -13,8 +13,8 @@ export function Layout({
   selectedPlaylistId
 }: { 
   children: React.ReactNode, 
-  activeView: 'home' | 'users' | 'playlist' | 'admin-songs', 
-  setActiveView: (view: 'home' | 'users' | 'playlist' | 'admin-songs') => void,
+  activeView: 'home' | 'users' | 'playlist' | 'admin-songs' | 'library' | 'search', 
+  setActiveView: (view: 'home' | 'users' | 'playlist' | 'admin-songs' | 'library' | 'search') => void,
   onSelectPlaylist: (id: string) => void,
   selectedPlaylistId?: string | null
 }) {
@@ -182,7 +182,7 @@ export function Layout({
         <Sidebar 
           className="w-64" 
           id="main-sidebar" 
-          activeView={activeView === 'users' ? 'users' : (activeView === 'home' ? 'home' : 'playlist')} 
+          activeView={activeView} 
           setActiveView={setActiveView} 
           onSelectPlaylist={onSelectPlaylist}
           selectedPlaylistId={selectedPlaylistId}

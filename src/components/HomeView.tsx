@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePlayer } from '../context/PlayerContext';
 import { Song, Playlist } from '../types';
-import { Play, Plus, Clock, Upload, X, Music2, Edit2, Check, Trash2 } from 'lucide-react';
+import { Play, Plus, Clock, Upload, X, Music2, Edit2, Check, Trash2, MoreHorizontal, Search as SearchIcon } from 'lucide-react';
 import { formatTime, cn } from '../lib/utils';
-import { updateDoc, doc, deleteDoc } from 'firebase/firestore';
 
-export function HomeView() {
+export function HomeView({ title = "Your Groove", onlyUserSongs = false, searchMode = false }: { title?: string, onlyUserSongs?: boolean, searchMode?: boolean }) {
   const { user, isAdmin } = useAuth();
   const { playSong, currentSong, isPlaying } = usePlayer();
   const [songs, setSongs] = useState<Song[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newSong, setNewSong] = useState({ title: '', artist: '' });
@@ -33,40 +33,84 @@ export function HomeView() {
 
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'songs'), orderBy('createdAt', 'desc'));
+    let q = query(collection(db, 'songs'));
+    if (onlyUserSongs) {
+      q = query(collection(db, 'songs'), where('uploaderId', '==', user.uid));
+    } else {
+      q = query(collection(db, 'songs'), orderBy('createdAt', 'desc'));
+    }
     return onSnapshot(q, (snapshot) => {
-      setSongs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Song)));
+      let fetchedSongs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Song));
+      if (onlyUserSongs) {
+        // Sort in memory for library to avoid index requirement
+        fetchedSongs.sort((a, b) => {
+          const timeA = a.createdAt?.toMillis?.() || 0;
+          const timeB = b.createdAt?.toMillis?.() || 0;
+          return timeB - timeA;
+        });
+      }
+      setSongs(fetchedSongs);
     }, (error) => {
       console.error("Rules likely restricted list:", error);
     });
   }, [user]);
+
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !user) return;
 
     setUploading(true);
+    setErrorMessage(null);
+    setUploadProgress(0);
+
     try {
       const storageRef = ref(storage, `songs/${user.uid}/${Date.now()}_${file.name}`);
-      const uploadResult = await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(uploadResult.ref);
+      const uploadTask = uploadBytesResumable(storageRef, file);
 
-      await addDoc(collection(db, 'songs'), {
-        title: newSong.title || file.name,
-        artist: newSong.artist || 'Unknown Artist',
-        audioUrl: url,
-        uploaderId: user.uid,
-        uploaderEmail: user.email,
-        createdAt: serverTimestamp()
-      });
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setUploadProgress(Math.round(progress));
+        },
+        (error) => {
+          console.error("Upload failed:", error);
+          setErrorMessage("Failed to upload file to storage. Please check your connection.");
+          setUploading(false);
+          setUploadProgress(null);
+        },
+        async () => {
+          try {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            await addDoc(collection(db, 'songs'), {
+              title: newSong.title || file.name,
+              artist: newSong.artist || 'Unknown Artist',
+              audioUrl: url,
+              uploaderId: user.uid,
+              uploaderEmail: user.email,
+              createdAt: serverTimestamp()
+            });
 
-      setShowUpload(false);
-      setFile(null);
-      setNewSong({ title: '', artist: '' });
-    } catch (err) {
+            setShowUpload(false);
+            setFile(null);
+            setNewSong({ title: '', artist: '' });
+          } catch (dbErr: any) {
+            console.error("Database save failed:", dbErr);
+            setErrorMessage(`Failed to save song info: ${dbErr.message || 'Check database permissions'}`);
+          } finally {
+            setUploading(false);
+            setUploadProgress(null);
+          }
+        }
+      );
+    } catch (err: any) {
       console.error(err);
-    } finally {
+      setErrorMessage(err.message || "An unexpected error occurred during upload.");
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -117,6 +161,11 @@ export function HomeView() {
     }
   };
 
+  const filteredSongs = songs.filter(song => 
+    song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    song.artist.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <div className="flex flex-col flex-1 relative h-full">
       {/* Background Glow */}
@@ -141,6 +190,22 @@ export function HomeView() {
       </header>
 
       <div className="px-8 py-4 flex-1 z-10 flex flex-col scrollbar-hide overflow-y-auto">
+        {searchMode && (
+          <div className="mb-8">
+            <div className="relative max-w-xl">
+              <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
+              <input 
+                type="text"
+                placeholder="What do you want to listen to?"
+                autoFocus
+                className="w-full bg-[#242424] hover:bg-[#2a2a2a] focus:bg-[#2a2a2a] border border-transparent focus:border-white/10 rounded-full py-3.5 pl-12 pr-4 text-sm outline-none transition-all placeholder:text-zinc-500"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="flex items-end gap-6 mb-12">
           <div className="w-52 h-52 shadow-[0_35px_60px_-15px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden flex-shrink-0">
             <div className="w-full h-full bg-gradient-to-br from-spotify-green to-emerald-900 flex items-center justify-center">
@@ -149,9 +214,9 @@ export function HomeView() {
           </div>
           <div className="flex flex-col gap-2 pb-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-[#b3b3b3]">Playlist</span>
-            <h1 className="text-7xl font-black mb-2 tracking-tighter">Your Groove</h1>
+            <h1 className="text-7xl font-black mb-2 tracking-tighter">{title}</h1>
             <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
-              <span className="text-white">{user?.displayName || 'User'}</span> • {songs.length} songs
+              <span className="text-white">{user?.displayName || 'User'}</span> • {filteredSongs.length} songs
             </div>
           </div>
         </div>
@@ -166,10 +231,10 @@ export function HomeView() {
           </div>
 
           <div className="space-y-1">
-            {songs.map((song, index) => (
+            {filteredSongs.map((song, index) => (
               <div 
                 key={song.id} 
-                onDoubleClick={() => playSong(song, songs)}
+                onDoubleClick={() => playSong(song, filteredSongs)}
                 className="grid grid-cols-[16px_1fr_1fr_40px] gap-4 px-4 py-3 rounded-md hover:bg-white/5 transition-all group items-center cursor-pointer"
               >
                 <div className="text-sm">
@@ -235,33 +300,43 @@ export function HomeView() {
                     </div>
                   )}
                   
-                  <div className="relative group/menu">
+                  <div className="relative">
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowPlaylistMenu(showPlaylistMenu === song.id ? null : song.id);
                       }}
-                      className="text-zinc-500 hover:text-white p-1 hover:bg-white/10 rounded"
+                      className="text-zinc-500 hover:text-white p-2 hover:bg-white/10 rounded-full transition-colors"
+                      title="Add to playlist"
                     >
-                      <Plus size={16} />
+                      <MoreHorizontal size={20} />
                     </button>
                     {showPlaylistMenu === song.id && (
-                      <div className="absolute right-0 bottom-full mb-2 w-48 bg-[#282828] border border-white/10 rounded-md shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-                        <div className="p-2 border-b border-white/5 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                          Add to playlist
+                      <div className="absolute right-0 bottom-full mb-2 w-56 bg-[#282828] border border-white/10 rounded-md shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-150">
+                        <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Add to playlist</span>
+                          <button onClick={() => setShowPlaylistMenu(null)} className="text-zinc-500 hover:text-white">
+                            <X size={14} />
+                          </button>
                         </div>
-                        <div className="max-h-40 overflow-y-auto pt-1">
+                        <div className="max-h-60 overflow-y-auto py-1">
                           {playlists.map(p => (
                             <button
                               key={p.id}
-                              onClick={() => addToPlaylist(p.id, song.id)}
-                              className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/10 hover:text-white truncate"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addToPlaylist(p.id, song.id);
+                              }}
+                              className="w-full text-left px-3 py-2.5 text-sm text-zinc-300 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2 truncate"
                             >
+                              <Plus size={14} className="text-zinc-500" />
                               {p.name}
                             </button>
                           ))}
                           {playlists.length === 0 && (
-                            <div className="px-3 py-2 text-[10px] text-zinc-600 italic">No playlists</div>
+                            <div className="px-4 py-4 text-center">
+                              <p className="text-xs text-zinc-500 mb-2 italic">You haven't created any playlists yet.</p>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -294,6 +369,14 @@ export function HomeView() {
               <X size={24} />
             </button>
             <h2 className="text-2xl font-bold mb-8">Upload Track</h2>
+            
+            {errorMessage && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-500 text-xs p-3 rounded-lg mb-6 flex items-center gap-2">
+                <X size={14} className="flex-shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
             <form onSubmit={handleUpload} className="space-y-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Song Title</label>
@@ -333,13 +416,30 @@ export function HomeView() {
                     onChange={e => {
                       const selectedFile = e.target.files?.[0];
                       if (selectedFile) {
-                        console.log("Selected file type:", selectedFile.type);
                         setFile(selectedFile);
+                        setErrorMessage(null);
                       }
                     }} 
+                    disabled={uploading}
                   />
                 </label>
               </div>
+
+              {uploading && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    <span>Broadcasting...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-spotify-green transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <button 
                 type="submit"
                 disabled={uploading || !file}
